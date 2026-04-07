@@ -245,6 +245,52 @@ function scanMemory() {
   return { nodes, edges, colors: CATEGORY_COLORS };
 }
 
+// --- Append-only Access History ---
+const HISTORY_FILE = path.join(STATIC, 'access-history.jsonl');
+let currentSessionId = null;
+let sessionCounter = 0;
+
+function detectSessionId() {
+  // Read from the session watcher's current file
+  const sessDir = path.join(process.env.HOME, '.openclaw', 'agents', 'main', 'sessions');
+  try {
+    const files = fs.readdirSync(sessDir).filter(f => f.endsWith('.jsonl'));
+    let latest = null, latestMtime = 0;
+    for (const f of files) {
+      const stat = fs.statSync(path.join(sessDir, f));
+      if (stat.mtimeMs > latestMtime) { latestMtime = stat.mtimeMs; latest = f; }
+    }
+    return latest ? latest.replace('.jsonl', '') : null;
+  } catch { return null; }
+}
+
+function appendHistory(event) {
+  const sessionId = detectSessionId();
+  if (sessionId !== currentSessionId) {
+    currentSessionId = sessionId;
+    sessionCounter++;
+  }
+
+  const entry = {
+    ts: Date.now(),
+    iso: new Date().toISOString(),
+    session: currentSessionId,
+    sessionNum: sessionCounter,
+    type: event.type, // read, write, search, grep
+    path: event.path || null,
+    query: event.query || null,
+    results: event.results ? event.results.map(r => ({
+      path: r.path,
+      score: Math.round((r.score || 0) * 100),
+      snippet: (r.snippet || '').slice(0, 60)
+    })) : null,
+  };
+
+  try {
+    fs.appendFileSync(HISTORY_FILE, JSON.stringify(entry) + '\n');
+  } catch (e) { console.error('History write failed:', e.message); }
+}
+
 // --- Initial scan ---
 let graphData;
 try {
@@ -281,6 +327,43 @@ const server = http.createServer(async (req, res) => {
     return res.end();
   }
 
+  // GET /api/history — return access history
+  if (req.url.startsWith('/api/history') && req.method === 'GET') {
+    try {
+      const params = new URL(req.url, 'http://localhost').searchParams;
+      const limit = parseInt(params.get('limit')) || 200;
+      const session = params.get('session') || null;
+
+      let lines = [];
+      if (fs.existsSync(HISTORY_FILE)) {
+        lines = fs.readFileSync(HISTORY_FILE, 'utf8').trim().split('\n').filter(Boolean);
+      }
+
+      let entries = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+      if (session) entries = entries.filter(e => e.session === session || e.sessionNum === parseInt(session));
+
+      // Group by session for the timeline view
+      const sessions = {};
+      for (const e of entries) {
+        const key = e.sessionNum || 0;
+        if (!sessions[key]) sessions[key] = { sessionNum: key, sessionId: e.session, events: [], startTime: e.iso, endTime: e.iso };
+        sessions[key].events.push(e);
+        sessions[key].endTime = e.iso;
+      }
+
+      const recent = entries.slice(-limit);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({
+        total: entries.length,
+        sessions: Object.values(sessions),
+        recent
+      }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: e.message }));
+    }
+  }
+
   // GET /api/graph-data
   if (req.url === '/api/graph-data' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -292,6 +375,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const event = await parseBody(req);
       event.timestamp = Date.now();
+      appendHistory(event);
       broadcast(JSON.stringify({ type: 'event', data: event }));
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ ok: true }));
@@ -442,19 +526,23 @@ function startSessionWatcher() {
     if (name === 'read' || name === 'memory_get') {
       const p = normPath(args.path);
       if (p && (p.includes('memory') || p.endsWith('.md'))) {
-        broadcast(JSON.stringify({ type: 'event', data: { type: 'read', path: p, timestamp: Date.now() }}));
+        const ev = { type: 'read', path: p, timestamp: Date.now() };
+        appendHistory(ev);
+        broadcast(JSON.stringify({ type: 'event', data: ev }));
       }
     }
     if (name === 'write' || name === 'edit') {
       const p = normPath(args.path);
       if (p && (p.includes('memory') || p.endsWith('.md'))) {
-        broadcast(JSON.stringify({ type: 'event', data: { type: 'write', path: p, timestamp: Date.now() }}));
+        const ev = { type: 'write', path: p, timestamp: Date.now() };
+        appendHistory(ev);
+        broadcast(JSON.stringify({ type: 'event', data: ev }));
       }
     }
     if (name === 'memory_search') {
-      broadcast(JSON.stringify({ type: 'event', data: {
-        type: 'search', query: args.query || '', results: [], timestamp: Date.now()
-      }}));
+      const ev = { type: 'search', query: args.query || '', results: [], timestamp: Date.now() };
+      appendHistory(ev);
+      broadcast(JSON.stringify({ type: 'event', data: ev }));
     }
     if (name === 'exec') {
       const cmd = args.command || '';
@@ -464,7 +552,11 @@ function startSessionWatcher() {
           const parts = m.split(/\s+/);
           const last = parts[parts.length - 1];
           const p = normPath(last);
-          if (p) broadcast(JSON.stringify({ type: 'event', data: { type: 'grep', path: p, timestamp: Date.now() }}));
+          if (p) {
+            const ev = { type: 'grep', path: p, timestamp: Date.now() };
+            appendHistory(ev);
+            broadcast(JSON.stringify({ type: 'event', data: ev }));
+          }
         }
       }
     }

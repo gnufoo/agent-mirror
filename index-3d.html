@@ -41,6 +41,36 @@ body{background:#0a0a0f;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFo
 .ws-status.connected{color:#22c55e;background:#22c55e15;border:1px solid #22c55e30;}
 .ws-status.disconnected{color:#ef4444;background:#ef444415;border:1px solid #ef444430;}
 
+/* History panel */
+.history-panel{position:fixed;top:0;left:0;width:420px;height:100vh;background:#111118f5;border-right:1px solid #1a1a25;z-index:15;display:none;flex-direction:column;backdrop-filter:blur(8px);overflow:hidden;}
+.history-panel.show{display:flex;}
+.hist-sessions{flex:1;overflow-y:auto;padding:12px;}
+.hist-session{margin-bottom:16px;}
+.hist-session-header{font-family:'JetBrains Mono';font-size:11px;color:#4488ff;font-weight:700;padding:6px 10px;background:#0a0a0f;border-radius:6px 6px 0 0;border:1px solid #1a1a25;display:flex;justify-content:space-between;}
+.hist-session-header .h-time{color:#555;font-weight:400;}
+.hist-chain{border:1px solid #1a1a25;border-top:none;border-radius:0 0 6px 6px;background:#0d0d15;padding:8px;}
+.hist-event{display:flex;align-items:flex-start;gap:8px;padding:6px 8px;margin-bottom:2px;border-radius:4px;font-size:11px;position:relative;}
+.hist-event:hover{background:#16161e;}
+.hist-arrow{color:#333;font-size:10px;position:absolute;left:16px;top:-6px;}
+.hist-event:first-child .hist-arrow{display:none;}
+.hist-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:4px;}
+.hist-dot.read{background:#3b82f6;}
+.hist-dot.write{background:#fa5838;}
+.hist-dot.search{background:#a855f7;}
+.hist-dot.grep{background:#22d3ee;}
+.hist-body{flex:1;}
+.hist-type{font-family:'JetBrains Mono';font-size:9px;font-weight:700;text-transform:uppercase;}
+.hist-type.read{color:#3b82f6;}
+.hist-type.write{color:#fa5838;}
+.hist-type.search{color:#a855f7;}
+.hist-type.grep{color:#22d3ee;}
+.hist-path{font-family:'JetBrains Mono';font-size:10px;color:#aaa;margin-top:2px;word-break:break-all;}
+.hist-query{font-family:'JetBrains Mono';font-size:10px;color:#a855f7;font-style:italic;margin-top:2px;}
+.hist-results{margin-top:4px;padding-left:12px;}
+.hist-result{font-family:'JetBrains Mono';font-size:9px;color:#888;display:flex;gap:6px;margin-bottom:1px;}
+.hist-score{color:#ff8c42;min-width:30px;}
+.hist-time{font-family:'JetBrains Mono';font-size:9px;color:#444;margin-left:auto;flex-shrink:0;}
+
 .legend{position:fixed;bottom:20px;left:20px;z-index:10;background:#111118cc;border:1px solid #1a1a25;border-radius:10px;padding:14px 18px;backdrop-filter:blur(8px);}
 .legend h3{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;font-family:'JetBrains Mono';}
 .legend-item{display:flex;align-items:center;gap:8px;margin:4px 0;font-size:12px;cursor:pointer;}
@@ -70,7 +100,14 @@ body{background:#0a0a0f;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFo
   <button id="labelBtn" onclick="toggleLabels()">Toggle Labels</button>
   <button id="refBtn" onclick="toggleRefs()">Show Cross-Refs</button>
   <button id="debugBtn" onclick="toggleDebug()" style="background:#a855f720;border-color:#a855f740;color:#a855f7;">✨ Debug Pulse</button>
+  <button id="histBtn" onclick="toggleHistory()">📜 History</button>
   <a href="/legacy" style="background:#16161e;border:1px solid #2a2a35;color:#666;border-radius:6px;padding:6px 12px;font-size:11px;font-family:'JetBrains Mono';text-decoration:none;">2D View</a>
+</div>
+
+<!-- History Panel (hidden by default) -->
+<div class="history-panel" id="historyPanel">
+  <div class="sb-header"><span>Memory Access History</span><button onclick="toggleHistory()" style="background:none;border:none;color:#888;cursor:pointer;font-size:14px;">✕</button></div>
+  <div class="hist-sessions" id="histSessions"></div>
 </div>
 
 <div class="sidebar">
@@ -478,6 +515,88 @@ function addFeedItem(ev){
 }
 
 connectWS();
+
+// === HISTORY PANEL ===
+let historyVisible = false;
+
+function toggleHistory() {
+  historyVisible = !historyVisible;
+  const panel = document.getElementById('historyPanel');
+  const btn = document.getElementById('histBtn');
+  if (historyVisible) {
+    panel.classList.add('show');
+    btn.style.background = '#4488ff30';
+    btn.style.color = '#4488ff';
+    loadHistory();
+  } else {
+    panel.classList.remove('show');
+    btn.style.background = '#16161e';
+    btn.style.color = '#aaa';
+  }
+}
+
+function loadHistory() {
+  fetch('/api/history?limit=500').then(r=>r.json()).then(data => {
+    const container = document.getElementById('histSessions');
+    container.innerHTML = '';
+
+    if (!data.sessions || !data.sessions.length) {
+      container.innerHTML = '<div style="color:#555;font-size:12px;padding:20px;text-align:center;">No history yet. Start a conversation!</div>';
+      return;
+    }
+
+    // Show sessions in reverse order (newest first)
+    const sessions = [...data.sessions].reverse();
+
+    for (const sess of sessions) {
+      const div = document.createElement('div');
+      div.className = 'hist-session';
+
+      const startTime = new Date(sess.startTime).toLocaleString('en-US', {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
+      const eventCount = sess.events.length;
+
+      div.innerHTML = `<div class="hist-session-header">
+        <span>Session ${sess.sessionNum}</span>
+        <span class="h-time">${startTime} · ${eventCount} events</span>
+      </div>`;
+
+      const chain = document.createElement('div');
+      chain.className = 'hist-chain';
+
+      for (const ev of sess.events) {
+        const evDiv = document.createElement('div');
+        evDiv.className = 'hist-event';
+        const time = new Date(ev.iso).toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        
+        let body = '';
+        if (ev.type === 'search') {
+          body = `<div class="hist-query">"${ev.query || ''}"</div>`;
+          if (ev.results && ev.results.length) {
+            body += '<div class="hist-results">';
+            for (const r of ev.results) {
+              body += `<div class="hist-result"><span class="hist-score">${r.score}%</span><span>${r.path || ''}</span></div>`;
+            }
+            body += '</div>';
+          }
+        } else {
+          body = `<div class="hist-path">${ev.path || ''}</div>`;
+        }
+
+        evDiv.innerHTML = `<div class="hist-arrow">↓</div>
+          <div class="hist-dot ${ev.type}"></div>
+          <div class="hist-body">
+            <span class="hist-type ${ev.type}">${ev.type}</span>
+            ${body}
+          </div>
+          <span class="hist-time">${time}</span>`;
+        chain.appendChild(evDiv);
+      }
+
+      div.appendChild(chain);
+      container.appendChild(div);
+    }
+  }).catch(e => console.error('History load failed:', e));
+}
 
 // === RESIZE ===
 window.addEventListener('resize', () => {
