@@ -98,6 +98,7 @@ body{background:#0a0a0f;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFo
 
 <div class="controls">
   <button onclick="Graph.cameraPosition({x:0,y:0,z:500},null,1000)">Reset View</button>
+  <button id="rotateBtn" onclick="toggleRotate()" style="background:#22c55e20;border-color:#22c55e40;color:#22c55e;">↻ Auto Rotate</button>
   <button id="labelBtn" onclick="toggleLabels()">Toggle Labels</button>
   <button id="refBtn" onclick="toggleRefs()">Show Cross-Refs</button>
   <button id="debugBtn" onclick="toggleDebug()" style="background:#a855f720;border-color:#a855f740;color:#a855f7;">✨ Debug Pulse</button>
@@ -192,7 +193,42 @@ const Graph = ForceGraph3D({controlType:'orbit'})(document.getElementById('graph
   })
   // Warmup
   .warmupTicks(120)
-  .cooldownTime(5000)
+  .cooldownTime(5000);
+
+// Auto-rotate
+let autoRotate = false;
+let rotateSpeed = 0.002;
+
+function toggleRotate() {
+  autoRotate = !autoRotate;
+  const btn = document.getElementById('rotateBtn');
+  if (autoRotate) {
+    btn.style.background = '#22c55e';
+    btn.style.color = '#fff';
+    btn.textContent = '↻ Rotating';
+  } else {
+    btn.style.background = '#22c55e20';
+    btn.style.color = '#22c55e';
+    btn.textContent = '↻ Auto Rotate';
+  }
+}
+
+// Hook into render loop for rotation
+const origControls = Graph.controls();
+const _animate = () => {
+  if (autoRotate && origControls) {
+    const cam = Graph.camera();
+    const x = cam.position.x;
+    const z = cam.position.z;
+    cam.position.x = x * Math.cos(rotateSpeed) - z * Math.sin(rotateSpeed);
+    cam.position.z = x * Math.sin(rotateSpeed) + z * Math.cos(rotateSpeed);
+    cam.lookAt(Graph.scene().position);
+  }
+  requestAnimationFrame(_animate);
+};
+_animate();
+
+Graph
   .nodeThreeObjectExtend(false);
 
 // === LABEL & REF TOGGLES ===
@@ -292,7 +328,11 @@ fetch('/api/graph-data').then(r=>r.json()).then(data => {
   document.getElementById('edgeCount').textContent = links.length;
   
   // Set data — must happen after graph is initialized
-  setTimeout(() => Graph.graphData(graphData), 100);
+  setTimeout(() => {
+    Graph.graphData(graphData);
+    // Auto-enable rotate and labels on load
+    setTimeout(() => { toggleRotate(); toggleLabels(); }, 2000);
+  }, 100);
 
   // Build legend
   const legendEl = document.getElementById('legend');
