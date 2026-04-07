@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zero's Memory Graph — LIVE</title>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&display=swap');
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0f; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', sans-serif; overflow: hidden; }
+
+.header {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+  padding: 16px 24px; background: linear-gradient(180deg, #0a0a0f 60%, transparent);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.header h1 { font-size: 20px; letter-spacing: 2px; color: #fff; }
+.header .subtitle { color: #666; font-size: 12px; }
+.live-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-left: 12px; font-size: 10px; color: #22c55e; font-weight: 600;
+  letter-spacing: 1px; text-transform: uppercase;
+}
+.live-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: #22c55e;
+  animation: livePulse 2s infinite;
+}
+@keyframes livePulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 4px #22c55e; }
+  50% { opacity: 0.4; box-shadow: 0 0 1px #22c55e; }
+}
+.stats { display: flex; gap: 16px; font-size: 12px; color: #888; }
+.stats span { color: #4488ff; font-weight: 600; }
+
+.legend {
+  position: fixed; bottom: 20px; left: 20px; z-index: 10;
+  background: #111118cc; border: 1px solid #1a1a25; border-radius: 10px;
+  padding: 14px 18px; backdrop-filter: blur(8px);
+  max-height: calc(100vh - 100px); overflow-y: auto;
+}
+.legend h3 { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+.legend-item { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 12px; cursor: pointer; }
+.legend-item:hover { color: #fff; }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.legend-sep { border-top: 1px solid #1a1a25; margin: 8px 0; }
+
+.tooltip {
+  position: fixed; z-index: 20; pointer-events: none;
+  background: #16161eee; border: 1px solid #2a2a35; border-radius: 8px;
+  padding: 10px 14px; font-size: 12px; max-width: 300px;
+  display: none; backdrop-filter: blur(8px);
+}
+.tooltip .tt-label { font-weight: 600; color: #fff; margin-bottom: 4px; }
+.tooltip .tt-cat { color: #888; font-size: 11px; }
+.tooltip .tt-type { color: #4488ff; font-size: 10px; text-transform: uppercase; }
+.tooltip .tt-access { font-size: 10px; color: #aaa; margin-top: 4px; }
+
+.controls {
+  position: fixed; top: 60px; right: 320px; z-index: 10;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.controls button {
+  background: #16161e; border: 1px solid #2a2a35; color: #aaa; border-radius: 6px;
+  padding: 6px 12px; font-size: 11px; cursor: pointer;
+}
+.controls button:hover { background: #222; color: #fff; }
+
+/* Activity Feed Sidebar */
+.activity-feed {
+  position: fixed; top: 0; right: 0; bottom: 0; width: 300px; z-index: 10;
+  background: #0d0d14ee; border-left: 1px solid #1a1a25;
+  backdrop-filter: blur(12px); display: flex; flex-direction: column;
+  font-family: 'JetBrains Mono', monospace;
+}
+.feed-header {
+  padding: 16px; border-bottom: 1px solid #1a1a25;
+  font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 1px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.feed-header .event-count { color: #4488ff; font-weight: 600; }
+.feed-list {
+  flex: 1; overflow-y: auto; padding: 8px;
+}
+.feed-list::-webkit-scrollbar { width: 4px; }
+.feed-list::-webkit-scrollbar-track { background: transparent; }
+.feed-list::-webkit-scrollbar-thumb { background: #2a2a35; border-radius: 2px; }
+
+.feed-item {
+  padding: 8px 10px; border-radius: 6px; margin-bottom: 4px;
+  background: #11111800; border: 1px solid transparent;
+  animation: feedIn 0.3s ease-out;
+  transition: background 0.2s;
+}
+.feed-item:hover { background: #16161e; }
+.feed-item.new { border-color: #2a2a35; background: #16161e44; }
+@keyframes feedIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.feed-time { font-size: 9px; color: #444; margin-bottom: 2px; }
+.feed-badge {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 1px 6px; border-radius: 3px; text-transform: uppercase;
+  letter-spacing: 0.5px; margin-right: 6px;
+}
+.feed-badge.read { background: #3b82f620; color: #3b82f6; }
+.feed-badge.write { background: #fa583820; color: #fa5838; }
+.feed-badge.search { background: #a855f720; color: #a855f7; }
+.feed-badge.grep { background: #22d3ee20; color: #22d3ee; }
+.feed-path { font-size: 10px; color: #aaa; word-break: break-all; }
+.feed-query { font-size: 10px; color: #a855f7; font-style: italic; margin-top: 2px; }
+.feed-empty { text-align: center; color: #333; font-size: 11px; padding: 40px 20px; }
+
+svg { width: calc(100vw - 300px); height: 100vh; }
+
+.link { stroke-opacity: 0.15; }
+.link.structural { stroke: #ffffff; stroke-width: 1.5; stroke-opacity: 0.3; }
+.link.contains { stroke: #4488ff; stroke-width: 0.8; }
+.link.references { stroke: #ff8c42; stroke-width: 1.2; stroke-opacity: 0.4; stroke-dasharray: 4,3; }
+
+.node-label {
+  fill: #aaa; font-size: 9px; text-anchor: middle;
+  pointer-events: none; opacity: 0;
+  transition: opacity 0.2s;
+}
+.node-label.visible { opacity: 1; }
+.node-label.always-visible { opacity: 1; font-size: 11px; fill: #ddd; font-weight: 600; }
+
+/* Access count badge */
+.access-badge {
+  font-size: 7px; fill: #fff; text-anchor: middle; dominant-baseline: central;
+  pointer-events: none; font-weight: 600; font-family: 'JetBrains Mono', monospace;
+}
+
+/* Pulse glow filters */
+svg .pulse-glow-read { filter: drop-shadow(0 0 8px #3b82f6) drop-shadow(0 0 16px #3b82f6); }
+svg .pulse-glow-write { filter: drop-shadow(0 0 10px #fa5838) drop-shadow(0 0 20px #fa5838); }
+svg .pulse-glow-search { filter: drop-shadow(0 0 8px #a855f7) drop-shadow(0 0 16px #a855f7); }
+svg .pulse-glow-grep { filter: drop-shadow(0 0 8px #22d3ee) drop-shadow(0 0 16px #22d3ee); }
+
+/* WS status */
+.ws-status {
+  position: fixed; bottom: 20px; right: 320px; z-index: 10;
+  font-size: 10px; padding: 4px 10px; border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.ws-status.connected { color: #22c55e; background: #22c55e10; }
+.ws-status.disconnected { color: #ef4444; background: #ef444410; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>ZERO'S MEMORY GRAPH <span class="live-badge"><span class="live-dot"></span> LIVE</span></h1>
+    <div class="subtitle">Real-time memory access visualization</div>
+  </div>
+  <div class="stats">
+    <div><span id="nodeCount">0</span> nodes</div>
+    <div><span id="edgeCount">0</span> edges</div>
+    <div><span id="refCount">0</span> cross-refs</div>
+    <div><span id="eventCount">0</span> events</div>
+  </div>
+</div>
+
+<div class="controls">
+  <button onclick="resetZoom()">Reset View</button>
+  <button onclick="toggleLabels()">Toggle Labels</button>
+  <button onclick="highlightRefs()">Show Cross-Refs</button>
+  <button id="debugBtn" onclick="toggleDebugMode()" style="background:#a855f720;border-color:#a855f740;color:#a855f7;">✨ Debug Pulse</button>
+  <button onclick="rescanMemory()">Re-scan</button>
+</div>
+
+<div class="legend" id="legend"></div>
+<div class="tooltip" id="tooltip"></div>
+<div class="ws-status disconnected" id="wsStatus">DISCONNECTED</div>
+
+<svg id="graph"></svg>
+
+<div class="activity-feed">
+  <div class="feed-header">
+    <span>Activity Feed</span>
+    <span class="event-count" id="feedCount">0 events</span>
+  </div>
+  <div class="feed-list" id="feedList">
+    <div class="feed-empty">Waiting for memory events...</div>
+  </div>
+</div>
+
+<script>
+const ACCESS_COLORS = {
+  read: '#3b82f6',
+  write: '#fa5838',
+  search: '#a855f7',
+  grep: '#22d3ee',
+};
+
+const HEAT_COLORS = [
+  '#3b82f6', // cool blue (low)
+  '#6366f1', // indigo
+  '#a855f7', // purple
+  '#ec4899', // pink
+  '#f97316', // orange
+  '#ef4444', // hot red (high)
+];
+
+const width = window.innerWidth - 300;
+const height = window.innerHeight;
+let accessCounts = {};
+let totalEvents = 0;
+let simulation, nodeElements, linkElements, nodesData, edgesData, colorsData;
+let nodeMap = {};
+
+const svg = d3.select("#graph")
+  .attr("viewBox", [0, 0, width, height]);
+
+// Defs for glow filters
+const defs = svg.append("defs");
+['read', 'write', 'search', 'grep'].forEach(type => {
+  const color = ACCESS_COLORS[type];
+  const filter = defs.append("filter").attr("id", `glow-${type}`).attr("x", "-50%").attr("y", "-50%").attr("width", "200%").attr("height", "200%");
+  filter.append("feGaussianBlur").attr("stdDeviation", type === 'write' ? 6 : 4).attr("result", "blur");
+  filter.append("feFlood").attr("flood-color", color).attr("flood-opacity", 0.8);
+  filter.append("feComposite").attr("in2", "blur").attr("operator", "in");
+  const merge = filter.append("feMerge");
+  merge.append("feMergeNode");
+  merge.append("feMergeNode").attr("in", "SourceGraphic");
+});
+
+const g = svg.append("g");
+
+// zoom defined later in pulseNode section
+let _zoomRef;
+function resetZoom() {
+  if (_zoomRef) svg.transition().duration(750).call(_zoomRef.transform, d3.zoomIdentity.translate(width/2, height/2).scale(0.8).translate(-width/2, -height/2));
+}
+
+let showLabels = false;
+function toggleLabels() {
+  showLabels = !showLabels;
+  d3.selectAll(".node-label:not(.always-visible)").classed("visible", showLabels);
+}
+
+let refsHighlighted = false;
+function highlightRefs() {
+  refsHighlighted = !refsHighlighted;
+  d3.selectAll(".link.references")
+    .transition().duration(300)
+    .style("stroke-opacity", refsHighlighted ? 0.8 : 0.4)
+    .style("stroke-width", refsHighlighted ? 2.5 : 1.2);
+}
+
+function rescanMemory() {
+  fetch('/api/scan', { method: 'POST' })
+    .then(r => r.json())
+    .then(d => console.log('Rescan:', d))
+    .catch(e => console.error('Rescan failed:', e));
+}
+
+// --- Heat map color ---
+function getHeatColor(count) {
+  if (count === 0) return null;
+  const maxHeat = 20;
+  const t = Math.min(count / maxHeat, 1);
+  const idx = Math.min(Math.floor(t * (HEAT_COLORS.length - 1)), HEAT_COLORS.length - 2);
+  const frac = (t * (HEAT_COLORS.length - 1)) - idx;
+  const c1 = d3.color(HEAT_COLORS[idx]);
+  const c2 = d3.color(HEAT_COLORS[idx + 1]);
+  return d3.interpolateRgb(c1, c2)(frac);
+}
+
+// --- Build Graph ---
+function buildGraph(data) {
+  const { nodes, edges, colors } = data;
+  nodesData = nodes;
+  edgesData = edges;
+  colorsData = colors;
+
+  // Build node lookup map
+  nodeMap = {};
+  nodes.forEach(n => { nodeMap[n.id] = n; });
+
+  document.getElementById("nodeCount").textContent = nodes.length;
+  document.getElementById("edgeCount").textContent = edges.length;
+  document.getElementById("refCount").textContent = edges.filter(e => e.type === "references").length;
+
+  // Legend - categories
+  const legendEl = document.getElementById("legend");
+  legendEl.innerHTML = '<h3>Memory Categories</h3>';
+  const legendCats = Object.entries(colors)
+    .filter(([cat]) => nodes.some(n => n.category === cat))
+    .sort((a, b) => {
+      const order = ['core', 'identity', 'work', 'projects', 'meta', 'family', 'procedures', 'reflections', 'daily', 'nova-letters'];
+      const ia = order.indexOf(a[0]), ib = order.indexOf(b[0]);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+  for (const [cat, color] of legendCats) {
+    const item = document.createElement("div");
+    item.className = "legend-item";
+    item.innerHTML = `<div class="legend-dot" style="background:${color}"></div>${cat.replace(/[-_]/g, ' ')}`;
+    item.onclick = () => {
+      const active = item.classList.toggle("dimmed");
+      d3.selectAll('.node-circle').filter(d => d.category === cat)
+        .transition().duration(300).style("opacity", active ? 0.1 : 1);
+    };
+    legendEl.appendChild(item);
+  }
+
+  // Legend - access types
+  const sep = document.createElement("div");
+  sep.className = "legend-sep";
+  legendEl.appendChild(sep);
+
+  const accessHeader = document.createElement("h3");
+  accessHeader.textContent = "Access Types";
+  accessHeader.style.marginTop = "4px";
+  legendEl.appendChild(accessHeader);
+
+  for (const [type, color] of Object.entries(ACCESS_COLORS)) {
+    const item = document.createElement("div");
+    item.className = "legend-item";
+    item.innerHTML = `<div class="legend-dot" style="background:${color};box-shadow:0 0 6px ${color}"></div>${type}`;
+    legendEl.appendChild(item);
+  }
+
+  // Force simulation
+  simulation = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(edges).id(d => d.id).distance(d => {
+      if (d.type === "structural") return 80;
+      if (d.type === "contains") return 50;
+      return 120;
+    }).strength(d => {
+      if (d.type === "structural") return 0.8;
+      if (d.type === "contains") return 0.3;
+      return 0.15;
+    }))
+    .force("charge", d3.forceManyBody().strength(d => {
+      if (d.type === "category") return -400;
+      if (d.type === "core") return -300;
+      return -80;
+    }))
+    .force("center", d3.forceCenter(width / 2, height / 2))
+    .force("collision", d3.forceCollide().radius(d => d.size + 4))
+    .force("x", d3.forceX(width / 2).strength(0.03))
+    .force("y", d3.forceY(height / 2).strength(0.03));
+
+  // Links
+  linkElements = g.append("g")
+    .selectAll("line")
+    .data(edges)
+    .join("line")
+    .attr("class", d => `link ${d.type}`);
+
+  // Node groups
+  nodeElements = g.append("g")
+    .selectAll("g")
+    .data(nodes)
+    .join("g")
+    .attr("class", "node-group")
+    .call(d3.drag()
+      .on("start", dragstarted)
+      .on("drag", dragged)
+      .on("end", dragended));
+
+  // Heat ring (behind the main circle)
+  nodeElements.append("circle")
+    .attr("class", "heat-ring")
+    .attr("r", d => d.size + 3)
+    .attr("fill", "none")
+    .attr("stroke", "transparent")
+    .attr("stroke-width", 2)
+    .attr("stroke-opacity", 0);
+
+  // Node circles
+  nodeElements.append("circle")
+    .attr("class", "node-circle")
+    .attr("r", d => d.size)
+    .attr("fill", d => {
+      const c = colors[d.category] || "#666";
+      if (d.type === "category") return c;
+      if (d.type === "core") return c;
+      return c + "88";
+    })
+    .attr("stroke", d => colors[d.category] || "#666")
+    .attr("stroke-width", d => d.type === "category" ? 2 : d.type === "core" ? 1.5 : 0.5)
+    .style("cursor", "pointer");
+
+  // Glow for core and category
+  nodeElements.filter(d => d.type === "category" || d.type === "core")
+    .append("circle")
+    .attr("r", d => d.size + 6)
+    .attr("fill", "none")
+    .attr("stroke", d => colors[d.category] || "#666")
+    .attr("stroke-width", 0.5)
+    .attr("stroke-opacity", 0.3);
+
+  // Labels
+  nodeElements.append("text")
+    .attr("class", d => `node-label ${d.type === "category" || d.type === "core" ? "always-visible" : ""}`)
+    .attr("dy", d => d.size + 14)
+    .text(d => d.label.length > 25 ? d.label.slice(0, 22) + "\u2026" : d.label);
+
+  // Access count badges (hidden initially)
+  nodeElements.append("circle")
+    .attr("class", "badge-bg")
+    .attr("cx", d => d.size * 0.7)
+    .attr("cy", d => -d.size * 0.7)
+    .attr("r", 6)
+    .attr("fill", "#fa5838")
+    .attr("stroke", "#0a0a0f")
+    .attr("stroke-width", 1)
+    .style("display", "none");
+
+  nodeElements.append("text")
+    .attr("class", "access-badge")
+    .attr("x", d => d.size * 0.7)
+    .attr("y", d => -d.size * 0.7)
+    .text("")
+    .style("display", "none");
+
+  // Tooltip
+  const tooltip = document.getElementById("tooltip");
+  nodeElements.on("mouseover", (event, d) => {
+    tooltip.style.display = "block";
+    const count = accessCounts[d.id] || 0;
+    tooltip.innerHTML = `
+      <div class="tt-type">${d.type}</div>
+      <div class="tt-label">${d.label}</div>
+      <div class="tt-cat" style="color:${colors[d.category]||'#888'}">${d.category}</div>
+      ${count ? `<div class="tt-access">Accessed ${count} time${count > 1 ? 's' : ''}</div>` : ''}
+    `;
+    const connected = new Set();
+    edges.forEach(e => {
+      const sid = typeof e.source === "object" ? e.source.id : e.source;
+      const tid = typeof e.target === "object" ? e.target.id : e.target;
+      if (sid === d.id) connected.add(tid);
+      if (tid === d.id) connected.add(sid);
+    });
+    d3.selectAll(".node-circle").transition().duration(200)
+      .style("opacity", n => n.id === d.id || connected.has(n.id) ? 1 : 0.1);
+    d3.selectAll(".link").transition().duration(200)
+      .style("stroke-opacity", e => {
+        const sid = typeof e.source === "object" ? e.source.id : e.source;
+        const tid = typeof e.target === "object" ? e.target.id : e.target;
+        return sid === d.id || tid === d.id ? 0.7 : 0.02;
+      });
+    d3.selectAll(".node-label").filter(n => connected.has(n.id) || n.id === d.id).classed("visible", true);
+  })
+  .on("mousemove", (event) => {
+    tooltip.style.left = (event.clientX + 15) + "px";
+    tooltip.style.top = (event.clientY - 10) + "px";
+  })
+  .on("mouseout", () => {
+    tooltip.style.display = "none";
+    d3.selectAll(".node-circle").transition().duration(300).style("opacity", 1);
+    d3.selectAll(".link").transition().duration(300).style("stroke-opacity", null);
+    if (!showLabels) d3.selectAll(".node-label:not(.always-visible)").classed("visible", false);
+  });
+
+  simulation.on("tick", () => {
+    linkElements
+      .attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+      .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+    nodeElements.attr("transform", d => `translate(${d.x},${d.y})`);
+  });
+
+  // Click handler for debug mode
+  nodeElements.on('click', function(event, d) {
+    if (!debugMode) return;
+    event.stopPropagation();
+    handleDebugClick(d);
+  });
+
+  function dragstarted(event) {
+    if (debugMode) return; // disable drag in debug mode
+    if (!event.active) simulation.alphaTarget(0.3).restart();
+    event.subject.fx = event.subject.x; event.subject.fy = event.subject.y;
+  }
+  function dragged(event) {
+    event.subject.fx = event.x; event.subject.fy = event.y;
+  }
+  function dragended(event) {
+    if (!event.active) simulation.alphaTarget(0);
+    event.subject.fx = null; event.subject.fy = null;
+  }
+
+  setTimeout(() => resetZoom(), 500);
+}
+
+// --- Pulse Animations ---
+
+function findNodeById(targetPath) {
+  if (!targetPath) return null;
+  // Try exact match first
+  if (nodeMap[targetPath]) return targetPath;
+  // Try common id patterns
+  const tryPaths = [
+    targetPath,
+    'mem/' + targetPath,
+    'core/' + targetPath,
+    'mem/' + targetPath.replace(/^.*\/memory\//, ''),
+    'core/' + targetPath.replace(/^.*\/clawd\//, ''),
+  ];
+  for (const p of tryPaths) {
+    if (nodeMap[p]) return p;
+  }
+  // Fuzzy: match by filename
+  const basename = targetPath.split('/').pop();
+  for (const id of Object.keys(nodeMap)) {
+    if (id.endsWith('/' + basename) || id.endsWith('/' + basename.replace('.md', '') + '.md')) {
+      return id;
+    }
+  }
+  return null;
+}
+
+// ═══ DEBUG PULSE MODE ═══
+let debugMode = false;
+let lastDebugNode = null;
+
+function toggleDebugMode() {
+  debugMode = !debugMode;
+  const btn = document.getElementById('debugBtn');
+  if (debugMode) {
+    btn.style.background = '#a855f7';
+    btn.style.color = '#fff';
+    btn.textContent = '✨ Debug ON (click nodes)';
+    lastDebugNode = null;
+    // Change cursor
+    d3.selectAll('.node-group').style('cursor', 'crosshair');
+  } else {
+    btn.style.background = '#a855f720';
+    btn.style.color = '#a855f7';
+    btn.textContent = '✨ Debug Pulse';
+    lastDebugNode = null;
+    d3.selectAll('.node-group').style('cursor', 'grab');
+  }
+}
+
+function handleDebugClick(d) {
+  const colors = ['#3b82f6','#fa5838','#a855f7','#22d3ee','#22c55e'];
+  const color = colors[Math.floor(Math.random() * colors.length)];
+
+  if (lastDebugNode && lastDebugNode.id !== d.id) {
+    // Animate particles flowing from last node to this node
+    animateParticleTrail(lastDebugNode, d, color, () => {
+      // Pulse the target when particles arrive
+      const nodeId = resolveNodeId(d);
+      if (nodeId) {
+        pulseNode(nodeId, color, 3000);
+        updateAccessCount(nodeId);
+      }
+    });
+  } else {
+    // First click — just pulse
+    const nodeId = resolveNodeId(d);
+    if (nodeId) {
+      pulseNode(nodeId, color, 3000);
+      updateAccessCount(nodeId);
+    }
+  }
+  lastDebugNode = d;
+}
+
+function resolveNodeId(d) { return d.id; }
+
+function animateParticleTrail(fromNode, toNode, color, onArrive) {
+  const numParticles = 8;
+  const trailDuration = 1200;
+  const stagger = 80;
+
+  for (let i = 0; i < numParticles; i++) {
+    setTimeout(() => {
+      const particle = g.append('circle')
+        .attr('r', (3 + Math.random() * 3) / Math.sqrt(currentZoomScale))
+        .attr('fill', color)
+        .attr('opacity', 0.9 - i * 0.05)
+        .attr('cx', fromNode.x)
+        .attr('cy', fromNode.y);
+
+      // Add a subtle glow trail
+      const glow = g.append('circle')
+        .attr('r', (6 + Math.random() * 4) / Math.sqrt(currentZoomScale))
+        .attr('fill', color)
+        .attr('opacity', 0.2)
+        .attr('cx', fromNode.x)
+        .attr('cy', fromNode.y);
+
+      // Slightly randomize path with bezier-like offset
+      const midX = (fromNode.x + toNode.x) / 2 + (Math.random() - 0.5) * 60;
+      const midY = (fromNode.y + toNode.y) / 2 + (Math.random() - 0.5) * 60;
+
+      // Animate through midpoint then to target
+      particle
+        .transition().duration(trailDuration * 0.5).ease(d3.easeCubicIn)
+        .attr('cx', midX).attr('cy', midY)
+        .attr('r', (2 + Math.random() * 2) / Math.sqrt(currentZoomScale))
+        .transition().duration(trailDuration * 0.5).ease(d3.easeCubicOut)
+        .attr('cx', toNode.x).attr('cy', toNode.y)
+        .attr('r', (1) / Math.sqrt(currentZoomScale))
+        .attr('opacity', 0)
+        .remove();
+
+      glow
+        .transition().duration(trailDuration * 0.5).ease(d3.easeCubicIn)
+        .attr('cx', midX).attr('cy', midY)
+        .transition().duration(trailDuration * 0.5).ease(d3.easeCubicOut)
+        .attr('cx', toNode.x).attr('cy', toNode.y)
+        .attr('opacity', 0)
+        .remove();
+
+      // Spark bursts along the path
+      if (i % 3 === 0) {
+        setTimeout(() => {
+          for (let s = 0; s < 3; s++) {
+            g.append('circle')
+              .attr('cx', midX + (Math.random()-0.5)*20)
+              .attr('cy', midY + (Math.random()-0.5)*20)
+              .attr('r', (1.5) / Math.sqrt(currentZoomScale))
+              .attr('fill', color)
+              .attr('opacity', 0.7)
+              .transition().duration(500)
+              .attr('r', (0.3) / Math.sqrt(currentZoomScale))
+              .attr('opacity', 0)
+              .remove();
+          }
+        }, trailDuration * 0.4);
+      }
+    }, i * stagger);
+  }
+
+  // Draw a fading path line
+  const midX = (fromNode.x + toNode.x) / 2 + (Math.random() - 0.5) * 40;
+  const midY = (fromNode.y + toNode.y) / 2 + (Math.random() - 0.5) * 40;
+  const pathLine = g.append('path')
+    .attr('d', `M ${fromNode.x},${fromNode.y} Q ${midX},${midY} ${toNode.x},${toNode.y}`)
+    .attr('fill', 'none')
+    .attr('stroke', color)
+    .attr('stroke-width', 1.5 / Math.sqrt(currentZoomScale))
+    .attr('stroke-opacity', 0.3)
+    .attr('stroke-dasharray', '4,4');
+
+  pathLine.transition().delay(trailDuration + numParticles * stagger)
+    .duration(800)
+    .attr('stroke-opacity', 0)
+    .remove();
+
+  // Callback when last particle arrives
+  setTimeout(onArrive, trailDuration + (numParticles - 1) * stagger);
+}
+
+// Zoom with scale tracking for adaptive pulse sizing
+let currentZoomScale = 1;
+const zoomBehavior = d3.zoom()
+  .scaleExtent([0.2, 5])
+  .on('zoom', ({transform}) => {
+    g.attr('transform', transform);
+    currentZoomScale = transform.k;
+  });
+svg.call(zoomBehavior);
+_zoomRef = zoomBehavior;
+
+function pulseNode(nodeId, color, durationMs) {
+  const nodeGroup = nodeElements.filter(d => d.id === nodeId);
+  if (nodeGroup.empty()) return;
+
+  const node = nodeGroup.datum();
+  const filterType = Object.entries(ACCESS_COLORS).find(([, c]) => c === color);
+  const filterName = filterType ? `glow-${filterType[0]}` : null;
+
+  // Adaptive scale: compensate for zoom level
+  // When zoomed out (scale=0.3), make effects ~3x bigger
+  // When zoomed in (scale=2), make effects ~0.5x smaller
+  const zoomCompensation = 1 / Math.sqrt(currentZoomScale);
+  const rippleMultiplier = 4 * zoomCompensation;
+  const rippleMultiplier2 = 5 * zoomCompensation;
+  const strokeBase = 3 * zoomCompensation;
+  const flashScale = 1.8 * Math.min(zoomCompensation, 2);
+  const midScale = 1.3 * Math.min(zoomCompensation, 1.5);
+  const labelSize = Math.round(Math.min(13 * zoomCompensation, 24));
+  const edgeWidth = 2.5 * zoomCompensation;
+
+  // === SINGLE BEAT: receive signal → spring up → settle back ===
+  const circle = nodeGroup.select('.node-circle');
+  const origFill = circle.attr('fill');
+  const origR = node.size;
+  const origStroke = colorsData[node.category] || '#666';
+  const origStrokeW = node.type === 'category' ? 2 : node.type === 'core' ? 1.5 : 0.5;
+
+  circle.interrupt('pulse').attr('filter', filterName ? `url(#${filterName})` : null);
+
+  // Spring: snap big → ease back
+  circle.transition('pulse')
+    .duration(120)
+    .ease(d3.easeBackOut.overshoot(4))
+    .attr('r', origR * flashScale)
+    .attr('fill', color)
+    .attr('stroke', color)
+    .attr('stroke-width', 4 * zoomCompensation)
+    .attr('stroke-opacity', 1)
+    // Settle back
+    .transition().duration(durationMs - 120)
+    .ease(d3.easeElasticOut.amplitude(1).period(0.4))
+    .attr('r', origR)
+    .attr('fill', origFill)
+    .attr('stroke', origStroke)
+    .attr('stroke-width', origStrokeW)
+    .attr('stroke-opacity', 1)
+    .attr('filter', null);
+
+  // Label: snap visible, fade back
+  const label = nodeGroup.select('.node-label');
+  label
+    .classed('visible', true)
+    .attr('fill', color)
+    .attr('font-size', labelSize + 'px')
+    .attr('font-weight', '700')
+    .transition().delay(durationMs * 0.6).duration(durationMs * 0.4)
+    .ease(d3.easeCubicOut)
+    .attr('fill', '#aaa')
+    .attr('font-size', '9px')
+    .attr('font-weight', '400');
+  setTimeout(() => {
+    if (!showLabels) label.filter(':not(.always-visible)').classed('visible', false);
+  }, durationMs);
+
+  // === CONNECTED EDGES: briefly highlight ===
+  linkElements.filter(e => {
+    const sid = typeof e.source === 'object' ? e.source.id : e.source;
+    const tid = typeof e.target === 'object' ? e.target.id : e.target;
+    return sid === nodeId || tid === nodeId;
+  })
+    .transition().duration(200)
+    .style('stroke', color)
+    .style('stroke-opacity', 0.6)
+    .style('stroke-width', edgeWidth)
+    .transition().duration(durationMs - 200)
+    .ease(d3.easeCubicOut)
+    .style('stroke', null)
+    .style('stroke-opacity', null)
+    .style('stroke-width', null);
+}
+
+function updateAccessCount(nodeId) {
+  if (!accessCounts[nodeId]) accessCounts[nodeId] = 0;
+  accessCounts[nodeId]++;
+
+  const nodeGroup = nodeElements.filter(d => d.id === nodeId);
+  if (nodeGroup.empty()) return;
+
+  const count = accessCounts[nodeId];
+
+  // Update badge
+  nodeGroup.select('.badge-bg').style('display', 'block');
+  nodeGroup.select('.access-badge').style('display', 'block').text(count > 99 ? '99+' : count);
+
+  // Update heat ring — grows more dramatic with access count
+  const heatColor = getHeatColor(count);
+  if (heatColor) {
+    const heatSize = Math.min(3 + count * 0.8, 8);
+    nodeGroup.select('.heat-ring')
+      .transition().duration(800).ease(d3.easeCubicOut)
+      .attr('stroke', heatColor)
+      .attr('stroke-opacity', Math.min(0.4 + count * 0.08, 0.95))
+      .attr('stroke-width', heatSize)
+      .attr('r', nodeGroup.datum().size + heatSize + 2);
+  }
+
+  // Grow the node permanently based on access frequency
+  const growFactor = 1 + Math.min(count * 0.06, 0.5);
+  nodeGroup.select('.node-circle')
+    .transition('grow').duration(600).ease(d3.easeCubicOut)
+    .attr('r', nodeGroup.datum().size * growFactor);
+}
+
+// --- Activity Feed ---
+
+const feedList = document.getElementById('feedList');
+const MAX_FEED_ITEMS = 20;
+let feedItems = [];
+
+function addFeedItem(event) {
+  totalEvents++;
+  document.getElementById('eventCount').textContent = totalEvents;
+  document.getElementById('feedCount').textContent = totalEvents + ' events';
+
+  const item = document.createElement('div');
+  item.className = 'feed-item new';
+
+  const time = new Date(event.timestamp || Date.now());
+  const timeStr = time.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const pathStr = event.path ? event.path.replace(/^.*\/clawd\//, '') : 'unknown';
+
+  let html = `<div class="feed-time">${timeStr}</div>`;
+  html += `<span class="feed-badge ${event.type}">${event.type}</span>`;
+  html += `<span class="feed-path">${pathStr}</span>`;
+  if (event.query) {
+    html += `<div class="feed-query">"${event.query}"</div>`;
+  }
+  if (event.results && event.results.length > 0) {
+    html += `<div class="feed-path" style="color:#666;margin-top:2px">${event.results.length} match${event.results.length > 1 ? 'es' : ''}</div>`;
+  }
+  item.innerHTML = html;
+
+  // Remove empty message
+  const emptyMsg = feedList.querySelector('.feed-empty');
+  if (emptyMsg) emptyMsg.remove();
+
+  feedList.prepend(item);
+  feedItems.unshift(item);
+
+  // Remove "new" class after animation
+  setTimeout(() => item.classList.remove('new'), 300);
+
+  // Trim old items
+  while (feedItems.length > MAX_FEED_ITEMS) {
+    const old = feedItems.pop();
+    old.remove();
+  }
+}
+
+// --- WebSocket Connection ---
+
+function connectWebSocket() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${proto}//${location.host}`;
+  const ws = new WebSocket(wsUrl);
+  const statusEl = document.getElementById('wsStatus');
+
+  ws.onopen = () => {
+    statusEl.textContent = 'CONNECTED';
+    statusEl.className = 'ws-status connected';
+    console.log('WebSocket connected');
+  };
+
+  ws.onclose = () => {
+    statusEl.textContent = 'DISCONNECTED';
+    statusEl.className = 'ws-status disconnected';
+    console.log('WebSocket disconnected, reconnecting in 3s...');
+    setTimeout(connectWebSocket, 3000);
+  };
+
+  ws.onerror = () => {
+    ws.close();
+  };
+
+  ws.onmessage = (msg) => {
+    let parsed;
+    try { parsed = JSON.parse(msg.data); } catch { return; }
+
+    if (parsed.type === 'reload') {
+      // Full graph reload
+      g.selectAll('*').remove();
+      buildGraph(parsed.data);
+      return;
+    }
+
+    if (parsed.type === 'event') {
+      const event = parsed.data;
+      addFeedItem(event);
+
+      if (event.type === 'read') {
+        const nodeId = findNodeById(event.path);
+        if (nodeId) {
+          pulseNode(nodeId, ACCESS_COLORS.read, 3000);
+          updateAccessCount(nodeId);
+        }
+      }
+
+      else if (event.type === 'write') {
+        const nodeId = findNodeById(event.path);
+        if (nodeId) {
+          pulseNode(nodeId, ACCESS_COLORS.write, 5000);
+          updateAccessCount(nodeId);
+        }
+      }
+
+      else if (event.type === 'search') {
+        // Pulse all matched result nodes
+        if (event.results && Array.isArray(event.results)) {
+          event.results.forEach(result => {
+            const nodeId = findNodeById(result.path);
+            if (nodeId) {
+              const intensity = Math.max(0.3, Math.min(1, (result.score || 0.5)));
+              const durationMs = 3000 + Math.round(intensity * 2000);
+              pulseNode(nodeId, ACCESS_COLORS.search, durationMs);
+              updateAccessCount(nodeId);
+            }
+          });
+        }
+      }
+
+      else if (event.type === 'grep') {
+        // Pulse matched file nodes
+        if (event.results && Array.isArray(event.results)) {
+          event.results.forEach(result => {
+            const nodeId = findNodeById(result.path);
+            if (nodeId) {
+              pulseNode(nodeId, ACCESS_COLORS.grep, 3000);
+              updateAccessCount(nodeId);
+            }
+          });
+        } else if (event.path) {
+          const nodeId = findNodeById(event.path);
+          if (nodeId) {
+            pulseNode(nodeId, ACCESS_COLORS.grep, 3000);
+            updateAccessCount(nodeId);
+          }
+        }
+      }
+    }
+  };
+}
+
+// --- Initialize ---
+
+fetch("/api/graph-data")
+  .then(r => r.json())
+  .then(data => {
+    buildGraph(data);
+    connectWebSocket();
+  });
+</script>
+</body>
+</html>

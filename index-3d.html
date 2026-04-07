@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zero's Memory Graph — 3D</title>
+<script src="//cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="//unpkg.com/3d-force-graph@1.73.4/dist/3d-force-graph.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#0a0a0f;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro',sans-serif;overflow:hidden;}
+
+.header{position:fixed;top:0;left:0;right:0;z-index:10;padding:14px 24px;background:linear-gradient(180deg,#0a0a0f 60%,transparent);display:flex;align-items:center;justify-content:space-between;pointer-events:none;}
+.header *{pointer-events:auto;}
+.header h1{font-size:18px;letter-spacing:2px;color:#fff;}
+.live-badge{font-family:'JetBrains Mono';font-size:10px;color:#22c55e;background:#22c55e15;border:1px solid #22c55e40;padding:2px 10px;border-radius:99px;margin-left:10px;}
+.live-dot{display:inline-block;width:6px;height:6px;background:#22c55e;border-radius:50%;margin-right:4px;animation:blink 2s infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
+.stats{display:flex;gap:16px;font-size:12px;color:#888;} .stats span{color:#4488ff;font-weight:600;}
+
+.controls{position:fixed;top:60px;right:320px;z-index:10;display:flex;flex-direction:column;gap:6px;}
+.controls button{background:#16161e;border:1px solid #2a2a35;color:#aaa;border-radius:6px;padding:6px 12px;font-size:11px;cursor:pointer;font-family:'JetBrains Mono';}
+.controls button:hover{background:#222;color:#fff;}
+
+.sidebar{position:fixed;top:0;right:0;width:300px;height:100vh;background:#111118ee;border-left:1px solid #1a1a25;z-index:5;display:flex;flex-direction:column;backdrop-filter:blur(8px);}
+.sb-header{padding:14px 16px;border-bottom:1px solid #1a1a25;font-family:'JetBrains Mono';font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;display:flex;justify-content:space-between;}
+.sb-scroll{flex:1;overflow-y:auto;padding:8px;}
+.feed-item{padding:8px 10px;border-radius:6px;margin-bottom:4px;font-size:11px;background:#0a0a0f;border:1px solid #1a1a25;animation:fadeIn 0.3s;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+.feed-time{font-family:'JetBrains Mono';font-size:9px;color:#555;}
+.feed-badge{font-family:'JetBrains Mono';font-size:9px;padding:1px 6px;border-radius:3px;font-weight:600;margin-left:6px;}
+.feed-badge.read{background:#3b82f620;color:#3b82f6;}
+.feed-badge.write{background:#fa583820;color:#fa5838;}
+.feed-badge.search{background:#a855f720;color:#a855f7;}
+.feed-badge.grep{background:#22d3ee20;color:#22d3ee;}
+.feed-path{color:#aaa;margin-top:3px;word-break:break-all;font-family:'JetBrains Mono';font-size:10px;}
+.feed-query{color:#a855f7;font-style:italic;margin-top:2px;font-size:10px;}
+
+.ws-status{position:fixed;bottom:12px;right:312px;z-index:10;font-family:'JetBrains Mono';font-size:10px;padding:3px 10px;border-radius:99px;}
+.ws-status.connected{color:#22c55e;background:#22c55e15;border:1px solid #22c55e30;}
+.ws-status.disconnected{color:#ef4444;background:#ef444415;border:1px solid #ef444430;}
+
+.legend{position:fixed;bottom:20px;left:20px;z-index:10;background:#111118cc;border:1px solid #1a1a25;border-radius:10px;padding:14px 18px;backdrop-filter:blur(8px);}
+.legend h3{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;font-family:'JetBrains Mono';}
+.legend-item{display:flex;align-items:center;gap:8px;margin:4px 0;font-size:12px;cursor:pointer;}
+.legend-item:hover{color:#fff;}
+.legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+
+#graph{width:calc(100vw - 300px);height:100vh;}
+
+.node-label{font-family:'JetBrains Mono';font-size:10px;padding:1px 4px;border-radius:2px;background:rgba(0,0,0,0.6);}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>ZERO'S MEMORY GRAPH <span class="live-badge"><span class="live-dot"></span> LIVE 3D</span></h1>
+  </div>
+  <div class="stats" style="margin-right:320px;">
+    <div><span id="nodeCount">0</span> nodes</div>
+    <div><span id="edgeCount">0</span> edges</div>
+    <div><span id="eventCount">0</span> events</div>
+  </div>
+</div>
+
+<div class="controls">
+  <button onclick="Graph.cameraPosition({x:0,y:0,z:500},null,1000)">Reset View</button>
+  <button id="labelBtn" onclick="toggleLabels()">Toggle Labels</button>
+  <button id="refBtn" onclick="toggleRefs()">Show Cross-Refs</button>
+  <button id="debugBtn" onclick="toggleDebug()" style="background:#a855f720;border-color:#a855f740;color:#a855f7;">✨ Debug Pulse</button>
+  <a href="/legacy" style="background:#16161e;border:1px solid #2a2a35;color:#666;border-radius:6px;padding:6px 12px;font-size:11px;font-family:'JetBrains Mono';text-decoration:none;">2D View</a>
+</div>
+
+<div class="sidebar">
+  <div class="sb-header"><span>Activity Feed</span><span id="feedCount">0 events</span></div>
+  <div class="sb-scroll" id="feedList"></div>
+</div>
+
+<div class="ws-status disconnected" id="wsStatus">● Disconnected</div>
+<div style="position:fixed;bottom:12px;left:50%;transform:translateX(-50%);z-index:10;font-family:'JetBrains Mono';font-size:10px;color:#555;">
+  <a href="https://github.com/anthropic-zero/memory-graph" target="_blank" style="color:#4488ff;text-decoration:none;">⚡ Install zero-memory-live-viewer</a>
+  <span style="color:#333;"> | </span>
+  <span>Built by Zero</span>
+</div>
+<div class="legend" id="legend"></div>
+<div id="graph"></div>
+
+<script>
+// === CONFIG ===
+const CATEGORY_COLORS = {
+  identity:'#ff6b6b',work:'#4ecdc4',projects:'#45b7d1',meta:'#96ceb4',
+  family:'#dda0dd',procedures:'#f7dc6f',reflections:'#ff8c42',daily:'#7c7cbf',
+  'nova-letters':'#e8a0bf',core:'#ffffff',sessions:'#6a9fb5',
+  'meeting-briefs':'#c9b1ff',audit:'#82ca9d','satisfaction-insights':'#f9a825',
+  backups:'#78909c',_archive:'#546e7a',_experimental:'#ab47bc','.dreams':'#e040fb',
+};
+const ACCESS_COLORS = {read:'#3b82f6',write:'#fa5838',search:'#a855f7',grep:'#22d3ee'};
+
+let accessCounts = {};
+let totalEvents = 0;
+let debugMode = false, lastDebugNode = null;
+let graphData = {nodes:[], links:[]};
+
+// === INIT GRAPH ===
+const Graph = ForceGraph3D({controlType:'orbit'})(document.getElementById('graph'))
+  .width(window.innerWidth - 300)
+  .height(window.innerHeight)
+  .backgroundColor('#0a0a0f')
+  .showNavInfo(false)
+  // Node rendering
+  .nodeThreeObject(node => {
+    const color = CATEGORY_COLORS[node.category] || '#666';
+    const r = node.type==='category' ? node.size*0.7 : node.type==='core' ? node.size*0.5 : node.size*0.4;
+    const geo = new THREE.SphereGeometry(r, 10, 8);
+    const mat = new THREE.MeshPhongMaterial({
+      color: new THREE.Color(color),
+      emissive: new THREE.Color(color),
+      emissiveIntensity: 0.2,
+      transparent: true,
+      opacity: 0.85
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    node._mesh = mesh;
+    node._baseRadius = r;
+    node._baseColor = new THREE.Color(color);
+    node._mat = mat;
+    return mesh;
+  })
+  .nodeLabel(node => `
+    <div class="node-label">
+      <span style="color:${CATEGORY_COLORS[node.category]||'#888'}">${node.label}</span>
+      <span style="color:#555;font-size:9px;"> ${node.category}</span>
+      ${accessCounts[node.id] ? `<span style="color:#fa5838;"> ×${accessCounts[node.id]}</span>` : ''}
+    </div>
+  `)
+  // Links — colored by type
+  .linkColor(link => {
+    if(link.type === 'structural') return 'rgba(250,88,56,0.35)';
+    if(link.type === 'references') return 'rgba(255,140,66,0.4)';
+    return 'rgba(100,140,200,0.12)';
+  })
+  .linkWidth(link => {
+    if(link.type === 'structural') return 1.2;
+    if(link.type === 'references') return 0.8;
+    return 0.3;
+  })
+  .linkOpacity(1)
+  // Force tuning
+  // Click
+  .onNodeClick(node => {
+    if(debugMode) handleDebugClick(node);
+  })
+  // Warmup
+  .warmupTicks(120)
+  .cooldownTime(5000)
+  .nodeThreeObjectExtend(false);
+
+// === LABEL & REF TOGGLES ===
+let labelsVisible = false;
+let refsHighlighted = false;
+
+function toggleLabels() {
+  labelsVisible = !labelsVisible;
+  const btn = document.getElementById('labelBtn');
+  if (labelsVisible) {
+    btn.style.background = '#4488ff30';
+    btn.style.color = '#4488ff';
+    Graph.nodeThreeObject(node => {
+      const color = CATEGORY_COLORS[node.category] || '#666';
+      const r = node.type==='category' ? node.size*0.7 : node.type==='core' ? node.size*0.5 : node.size*0.4;
+      const group = new THREE.Group();
+      const geo = new THREE.SphereGeometry(r, 10, 8);
+      const mat = new THREE.MeshPhongMaterial({color:new THREE.Color(color),emissive:new THREE.Color(color),emissiveIntensity:0.2,transparent:true,opacity:0.85});
+      const mesh = new THREE.Mesh(geo, mat);
+      group.add(mesh);
+      // Sprite label
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = 256; canvas.height = 64;
+      ctx.fillStyle = 'transparent'; ctx.fillRect(0,0,256,64);
+      ctx.font = '600 24px JetBrains Mono';
+      ctx.fillStyle = color;
+      ctx.textAlign = 'center';
+      ctx.fillText(node.label.slice(0,20), 128, 40);
+      const tex = new THREE.CanvasTexture(canvas);
+      const spriteMat = new THREE.SpriteMaterial({map:tex, transparent:true, depthWrite:false});
+      const sprite = new THREE.Sprite(spriteMat);
+      sprite.scale.set(r*6, r*1.5, 1);
+      sprite.position.y = r + 3;
+      group.add(sprite);
+      node._mesh = mesh; node._baseRadius = r; node._baseColor = new THREE.Color(color); node._mat = mat;
+      return group;
+    });
+  } else {
+    btn.style.background = '#16161e';
+    btn.style.color = '#aaa';
+    Graph.nodeThreeObject(node => {
+      const color = CATEGORY_COLORS[node.category] || '#666';
+      const r = node.type==='category' ? node.size*0.7 : node.type==='core' ? node.size*0.5 : node.size*0.4;
+      const geo = new THREE.SphereGeometry(r, 10, 8);
+      const mat = new THREE.MeshPhongMaterial({color:new THREE.Color(color),emissive:new THREE.Color(color),emissiveIntensity:0.2,transparent:true,opacity:0.85});
+      const mesh = new THREE.Mesh(geo, mat);
+      node._mesh = mesh; node._baseRadius = r; node._baseColor = new THREE.Color(color); node._mat = mat;
+      return mesh;
+    });
+  }
+}
+
+function toggleRefs() {
+  refsHighlighted = !refsHighlighted;
+  const btn = document.getElementById('refBtn');
+  if (refsHighlighted) {
+    btn.style.background = '#ff8c4230';
+    btn.style.color = '#ff8c42';
+    btn.textContent = 'Hide Cross-Refs';
+    Graph.linkColor(link => {
+      if(link.type === 'structural') return 'rgba(250,88,56,0.5)';
+      if(link.type === 'references') return 'rgba(255,140,66,0.8)';
+      return 'rgba(100,140,200,0.05)';
+    }).linkWidth(link => {
+      if(link.type === 'structural') return 1.5;
+      if(link.type === 'references') return 1.5;
+      return 0.1;
+    });
+  } else {
+    btn.style.background = '#16161e';
+    btn.style.color = '#aaa';
+    btn.textContent = 'Show Cross-Refs';
+    Graph.linkColor(link => {
+      if(link.type === 'structural') return 'rgba(250,88,56,0.35)';
+      if(link.type === 'references') return 'rgba(255,140,66,0.4)';
+      return 'rgba(100,140,200,0.12)';
+    }).linkWidth(link => {
+      if(link.type === 'structural') return 1.2;
+      if(link.type === 'references') return 0.8;
+      return 0.3;
+    });
+  }
+}
+
+// === LOAD DATA ===
+fetch('/api/graph-data').then(r=>r.json()).then(data => {
+  // Convert edges to links format (3d-force-graph expects 'links')
+  const links = (data.edges||[]).map(e => ({
+    source: e.source,
+    target: e.target,
+    type: e.type
+  }));
+  graphData = {nodes: data.nodes, links};
+  
+  document.getElementById('nodeCount').textContent = data.nodes.length;
+  document.getElementById('edgeCount').textContent = links.length;
+  
+  // Set data — must happen after graph is initialized
+  setTimeout(() => Graph.graphData(graphData), 100);
+
+  // Build legend
+  const legendEl = document.getElementById('legend');
+  legendEl.innerHTML = '<h3>Categories</h3>';
+  const cats=[['core','Core'],['identity','Identity'],['work','Work'],['projects','Projects'],['meta','Meta'],['reflections','Reflections'],['daily','Daily'],['family','Family']];
+  for(const [cat,label] of cats){
+    const c=CATEGORY_COLORS[cat]||'#666';
+    const item=document.createElement('div');
+    item.className='legend-item';
+    item.innerHTML=`<div class="legend-dot" style="background:${c}"></div>${label}`;
+    legendEl.appendChild(item);
+  }
+  // Access type legend
+  const atHeader=document.createElement('h3');
+  atHeader.textContent='Access Types';
+  atHeader.style.marginTop='8px';
+  legendEl.appendChild(atHeader);
+  for(const [type,color] of Object.entries(ACCESS_COLORS)){
+    const item=document.createElement('div');
+    item.className='legend-item';
+    item.innerHTML=`<div class="legend-dot" style="background:${color}"></div>${type.toUpperCase()}`;
+    legendEl.appendChild(item);
+  }
+});
+
+// === PULSE ANIMATION ===
+const activePulses = [];
+
+function pulseNode(nodeId, colorStr, durationMs=2500) {
+  const node = graphData.nodes.find(n => n.id === nodeId);
+  if(!node || !node._mesh) return;
+
+  const color = new THREE.Color(colorStr);
+  activePulses.push({
+    node, start: performance.now(), duration: durationMs, color
+  });
+
+  if(!accessCounts[nodeId]) accessCounts[nodeId] = 0;
+  accessCounts[nodeId]++;
+}
+
+function updatePulses() {
+  const now = performance.now();
+  for(let i = activePulses.length-1; i >= 0; i--) {
+    const p = activePulses[i];
+    const elapsed = now - p.start;
+    const progress = elapsed / p.duration;
+
+    if(progress >= 1) {
+      // Reset
+      p.node._mesh.scale.setScalar(1);
+      p.node._mat.color.copy(p.node._baseColor);
+      p.node._mat.emissive.copy(p.node._baseColor);
+      p.node._mat.emissiveIntensity = 0.2;
+      activePulses.splice(i, 1);
+      continue;
+    }
+
+    // Spring scale
+    let scale;
+    if(progress < 0.06) {
+      scale = 1 + (progress/0.06) * 1.5;
+    } else {
+      const decay = (progress-0.06)/0.94;
+      scale = 1 + Math.exp(-decay*5) * Math.cos(decay*12) * 0.8;
+    }
+    p.node._mesh.scale.setScalar(scale);
+
+    // Color flash
+    const fade = Math.max(0, 1 - progress*1.8);
+    p.node._mat.color.lerpColors(p.node._baseColor, p.color, fade);
+    p.node._mat.emissive.lerpColors(p.node._baseColor, p.color, fade);
+    p.node._mat.emissiveIntensity = 0.2 + fade * 1.0;
+  }
+  requestAnimationFrame(updatePulses);
+}
+updatePulses();
+
+// === PARTICLE TRAIL (debug mode) ===
+function spawnTrail(fromNode, toNode, colorStr, onArrive) {
+  if(!fromNode._mesh || !toNode._mesh) return;
+  const color = new THREE.Color(colorStr);
+  const from = new THREE.Vector3(fromNode.x, fromNode.y, fromNode.z);
+  const to = new THREE.Vector3(toNode.x, toNode.y, toNode.z);
+  const mid = new THREE.Vector3().addVectors(from,to).multiplyScalar(0.5);
+  mid.x += (Math.random()-0.5)*40;
+  mid.y += (Math.random()-0.5)*40;
+  mid.z += (Math.random()-0.5)*40;
+  const curve = new THREE.CatmullRomCurve3([from, mid, to]);
+
+  const scene = Graph.scene();
+  const count = 8;
+  const stagger = 70;
+  const duration = 1000;
+
+  for(let i=0; i<count; i++){
+    setTimeout(()=>{
+      const geo = new THREE.SphereGeometry(0.6+Math.random()*0.4, 4, 3);
+      const mat = new THREE.MeshBasicMaterial({color, transparent:true, opacity:0.9});
+      const p = new THREE.Mesh(geo, mat);
+      scene.add(p);
+      const startTime = performance.now();
+      
+      function animate(){
+        const elapsed = performance.now() - startTime;
+        const t = elapsed / duration;
+        if(t >= 1){
+          scene.remove(p);
+          geo.dispose();
+          mat.dispose();
+          return;
+        }
+        const pt = curve.getPoint(t);
+        p.position.copy(pt);
+        mat.opacity = 1 - t;
+        p.scale.setScalar(1 - t*0.5);
+        requestAnimationFrame(animate);
+      }
+      animate();
+    }, i * stagger);
+  }
+
+  setTimeout(onArrive, duration + (count-1)*stagger);
+}
+
+// === DEBUG MODE ===
+function toggleDebug(){
+  debugMode = !debugMode;
+  const btn = document.getElementById('debugBtn');
+  if(debugMode){
+    btn.style.background='#a855f7';btn.style.color='#fff';btn.textContent='✨ Debug ON';
+    lastDebugNode=null;
+  } else {
+    btn.style.background='#a855f720';btn.style.color='#a855f7';btn.textContent='✨ Debug Pulse';
+    lastDebugNode=null;
+  }
+}
+
+function handleDebugClick(node){
+  const colors = ['#3b82f6','#fa5838','#a855f7','#22d3ee','#22c55e'];
+  const c = colors[Math.floor(Math.random()*colors.length)];
+  if(lastDebugNode && lastDebugNode.id !== node.id){
+    spawnTrail(lastDebugNode, node, c, ()=>{
+      pulseNode(node.id, c, 2500);
+    });
+  } else {
+    pulseNode(node.id, c, 2500);
+  }
+  lastDebugNode = node;
+}
+
+// === NODE ID RESOLVER ===
+function resolveNodeId(path){
+  if(!path) return null;
+  const clean = path.replace(/^\/home\/gnufoo\/clawd\//,'').replace(/^~\/clawd\//,'');
+  for(const n of graphData.nodes){
+    if(n.id === 'mem/'+clean || n.id === 'core/'+clean) return n.id;
+    if(n.id.endsWith('/'+clean)) return n.id;
+    if(clean.includes(n.label) && clean.includes(n.category)) return n.id;
+  }
+  return null;
+}
+
+// === WEBSOCKET ===
+function connectWS(){
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}`);
+  const statusEl = document.getElementById('wsStatus');
+  
+  ws.onopen = () => {
+    statusEl.className = 'ws-status connected';
+    statusEl.textContent = '● Connected';
+  };
+  ws.onclose = () => {
+    statusEl.className = 'ws-status disconnected';
+    statusEl.textContent = '● Disconnected';
+    setTimeout(connectWS, 3000);
+  };
+  ws.onmessage = (e) => {
+    try{
+      const msg = JSON.parse(e.data);
+      if(msg.type === 'event') handleEvent(msg.data);
+    }catch{}
+  };
+}
+
+function handleEvent(ev){
+  totalEvents++;
+  document.getElementById('eventCount').textContent = totalEvents;
+  document.getElementById('feedCount').textContent = totalEvents + ' events';
+  addFeedItem(ev);
+
+  const color = ACCESS_COLORS[ev.type] || '#ffffff';
+
+  if(ev.type === 'search' && ev.results){
+    ev.results.forEach((r,i) => {
+      setTimeout(()=>{
+        const nid = resolveNodeId(r.path);
+        if(nid) pulseNode(nid, color, 3000);
+      }, i * 200); // stagger search result pulses
+    });
+  } else if(ev.path){
+    const nid = resolveNodeId(ev.path);
+    if(nid) pulseNode(nid, color, 2500);
+  }
+}
+
+function addFeedItem(ev){
+  const list = document.getElementById('feedList');
+  const item = document.createElement('div');
+  item.className = 'feed-item';
+  const time = new Date().toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const path = ev.path || '';
+  let html = `<span class="feed-time">${time}</span><span class="feed-badge ${ev.type}">${ev.type.toUpperCase()}</span>`;
+  if(path) html += `<div class="feed-path">${path}</div>`;
+  if(ev.query) html += `<div class="feed-query">"${ev.query}"</div>`;
+  if(ev.results && ev.results.length) html += `<div class="feed-path" style="color:#a855f7">${ev.results.length} results</div>`;
+  item.innerHTML = html;
+  list.insertBefore(item, list.firstChild);
+  if(list.children.length > 30) list.removeChild(list.lastChild);
+}
+
+connectWS();
+
+// === RESIZE ===
+window.addEventListener('resize', () => {
+  Graph.width(window.innerWidth - 300).height(window.innerHeight);
+});
+</script>
+</body>
+</html>
