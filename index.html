@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zero's Memory Graph</title>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0f; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', sans-serif; overflow: hidden; }
+
+.header {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+  padding: 16px 24px; background: linear-gradient(180deg, #0a0a0f 60%, transparent);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.header h1 { font-size: 20px; letter-spacing: 2px; color: #fff; }
+.header .subtitle { color: #666; font-size: 12px; }
+.stats { display: flex; gap: 16px; font-size: 12px; color: #888; }
+.stats span { color: #4488ff; font-weight: 600; }
+
+.legend {
+  position: fixed; bottom: 20px; left: 20px; z-index: 10;
+  background: #111118cc; border: 1px solid #1a1a25; border-radius: 10px;
+  padding: 14px 18px; backdrop-filter: blur(8px);
+}
+.legend h3 { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+.legend-item { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 12px; cursor: pointer; }
+.legend-item:hover { color: #fff; }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+.tooltip {
+  position: fixed; z-index: 20; pointer-events: none;
+  background: #16161eee; border: 1px solid #2a2a35; border-radius: 8px;
+  padding: 10px 14px; font-size: 12px; max-width: 300px;
+  display: none; backdrop-filter: blur(8px);
+}
+.tooltip .tt-label { font-weight: 600; color: #fff; margin-bottom: 4px; }
+.tooltip .tt-cat { color: #888; font-size: 11px; }
+.tooltip .tt-type { color: #4488ff; font-size: 10px; text-transform: uppercase; }
+
+.controls {
+  position: fixed; top: 60px; right: 20px; z-index: 10;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.controls button {
+  background: #16161e; border: 1px solid #2a2a35; color: #aaa; border-radius: 6px;
+  padding: 6px 12px; font-size: 11px; cursor: pointer;
+}
+.controls button:hover { background: #222; color: #fff; }
+
+svg { width: 100vw; height: 100vh; }
+
+.link { stroke-opacity: 0.15; }
+.link.structural { stroke: #ffffff; stroke-width: 1.5; stroke-opacity: 0.3; }
+.link.contains { stroke: #4488ff; stroke-width: 0.8; }
+.link.references { stroke: #ff8c42; stroke-width: 1.2; stroke-opacity: 0.4; stroke-dasharray: 4,3; }
+
+.node-label {
+  fill: #aaa; font-size: 9px; text-anchor: middle;
+  pointer-events: none; opacity: 0;
+  transition: opacity 0.2s;
+}
+.node-label.visible { opacity: 1; }
+.node-label.always-visible { opacity: 1; font-size: 11px; fill: #ddd; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>ZERO'S MEMORY GRAPH</h1>
+    <div class="subtitle">AdaMem-style visualization of my memory architecture</div>
+  </div>
+  <div class="stats">
+    <div><span id="nodeCount">0</span> nodes</div>
+    <div><span id="edgeCount">0</span> edges</div>
+    <div><span id="refCount">0</span> cross-references</div>
+  </div>
+</div>
+
+<div class="controls">
+  <button onclick="resetZoom()">Reset View</button>
+  <button onclick="toggleLabels()">Toggle Labels</button>
+  <button onclick="highlightRefs()">Show Cross-Refs</button>
+</div>
+
+<div class="legend" id="legend"></div>
+<div class="tooltip" id="tooltip"></div>
+
+<svg id="graph"></svg>
+
+<script>
+const width = window.innerWidth;
+const height = window.innerHeight;
+
+const svg = d3.select("#graph")
+  .attr("viewBox", [0, 0, width, height]);
+
+const g = svg.append("g");
+
+const zoom = d3.zoom()
+  .scaleExtent([0.2, 5])
+  .on("zoom", ({transform}) => g.attr("transform", transform));
+svg.call(zoom);
+
+function resetZoom() {
+  svg.transition().duration(750).call(zoom.transform, d3.zoomIdentity.translate(width/2, height/2).scale(0.8).translate(-width/2, -height/2));
+}
+
+let showLabels = false;
+function toggleLabels() {
+  showLabels = !showLabels;
+  d3.selectAll(".node-label:not(.always-visible)").classed("visible", showLabels);
+}
+
+let refsHighlighted = false;
+function highlightRefs() {
+  refsHighlighted = !refsHighlighted;
+  d3.selectAll(".link.references")
+    .transition().duration(300)
+    .style("stroke-opacity", refsHighlighted ? 0.8 : 0.4)
+    .style("stroke-width", refsHighlighted ? 2.5 : 1.2);
+}
+
+fetch("/api/graph-data")
+  .then(r => r.json())
+  .then(data => {
+    const { nodes, edges, colors } = data;
+    
+    document.getElementById("nodeCount").textContent = nodes.length;
+    document.getElementById("edgeCount").textContent = edges.length;
+    document.getElementById("refCount").textContent = edges.filter(e => e.type === "references").length;
+    
+    // Legend
+    const legendEl = document.getElementById("legend");
+    legendEl.innerHTML = '<h3>Memory Categories</h3>';
+    const legendCats = [
+      ["core", "Core Files (injected)"],
+      ["identity", "Identity"],
+      ["work", "Work / Professional"],
+      ["projects", "Personal Projects"],
+      ["meta", "Meta / System"],
+      ["family", "Family / Personal"],
+      ["procedures", "Procedures"],
+      ["reflections", "Reflections / Signals"],
+      ["daily", "Daily Logs"],
+      ["nova-letters", "Nova Letters"],
+    ];
+    for (const [cat, label] of legendCats) {
+      const color = colors[cat] || "#666";
+      const item = document.createElement("div");
+      item.className = "legend-item";
+      item.innerHTML = `<div class="legend-dot" style="background:${color}"></div>${label}`;
+      item.onclick = () => {
+        const active = item.classList.toggle("dimmed");
+        d3.selectAll(`.node-circle`).filter(d => d.category === cat)
+          .transition().duration(300).style("opacity", active ? 0.1 : 1);
+      };
+      legendEl.appendChild(item);
+    }
+    
+    // Force simulation
+    const simulation = d3.forceSimulation(nodes)
+      .force("link", d3.forceLink(edges).id(d => d.id).distance(d => {
+        if (d.type === "structural") return 80;
+        if (d.type === "contains") return 50;
+        return 120;
+      }).strength(d => {
+        if (d.type === "structural") return 0.8;
+        if (d.type === "contains") return 0.3;
+        return 0.15;
+      }))
+      .force("charge", d3.forceManyBody().strength(d => {
+        if (d.type === "category") return -400;
+        if (d.type === "core") return -300;
+        return -80;
+      }))
+      .force("center", d3.forceCenter(width / 2, height / 2))
+      .force("collision", d3.forceCollide().radius(d => d.size + 4))
+      .force("x", d3.forceX(width / 2).strength(0.03))
+      .force("y", d3.forceY(height / 2).strength(0.03));
+    
+    // Links
+    const link = g.append("g")
+      .selectAll("line")
+      .data(edges)
+      .join("line")
+      .attr("class", d => `link ${d.type}`);
+    
+    // Nodes
+    const node = g.append("g")
+      .selectAll("g")
+      .data(nodes)
+      .join("g")
+      .call(d3.drag()
+        .on("start", dragstarted)
+        .on("drag", dragged)
+        .on("end", dragended));
+    
+    // Node circles
+    node.append("circle")
+      .attr("class", "node-circle")
+      .attr("r", d => d.size)
+      .attr("fill", d => {
+        const c = colors[d.category] || "#666";
+        if (d.type === "category") return c;
+        if (d.type === "core") return c;
+        return c + "88";
+      })
+      .attr("stroke", d => colors[d.category] || "#666")
+      .attr("stroke-width", d => d.type === "category" ? 2 : d.type === "core" ? 1.5 : 0.5)
+      .style("cursor", "pointer");
+    
+    // Glow for core and category
+    node.filter(d => d.type === "category" || d.type === "core")
+      .append("circle")
+      .attr("r", d => d.size + 6)
+      .attr("fill", "none")
+      .attr("stroke", d => colors[d.category] || "#666")
+      .attr("stroke-width", 0.5)
+      .attr("stroke-opacity", 0.3);
+    
+    // Labels
+    node.append("text")
+      .attr("class", d => `node-label ${d.type === "category" || d.type === "core" ? "always-visible" : ""}`)
+      .attr("dy", d => d.size + 14)
+      .text(d => d.label.length > 25 ? d.label.slice(0, 22) + "…" : d.label);
+    
+    // Tooltip
+    const tooltip = document.getElementById("tooltip");
+    node.on("mouseover", (event, d) => {
+      tooltip.style.display = "block";
+      tooltip.innerHTML = `
+        <div class="tt-type">${d.type}</div>
+        <div class="tt-label">${d.label}</div>
+        <div class="tt-cat" style="color:${colors[d.category]||'#888'}">${d.category}</div>
+      `;
+      // Highlight connections
+      const connected = new Set();
+      edges.forEach(e => {
+        const sid = typeof e.source === "object" ? e.source.id : e.source;
+        const tid = typeof e.target === "object" ? e.target.id : e.target;
+        if (sid === d.id) connected.add(tid);
+        if (tid === d.id) connected.add(sid);
+      });
+      d3.selectAll(".node-circle").transition().duration(200)
+        .style("opacity", n => n.id === d.id || connected.has(n.id) ? 1 : 0.1);
+      d3.selectAll(".link").transition().duration(200)
+        .style("stroke-opacity", e => {
+          const sid = typeof e.source === "object" ? e.source.id : e.source;
+          const tid = typeof e.target === "object" ? e.target.id : e.target;
+          return sid === d.id || tid === d.id ? 0.7 : 0.02;
+        });
+      d3.selectAll(".node-label").filter(n => connected.has(n.id) || n.id === d.id).classed("visible", true);
+    })
+    .on("mousemove", (event) => {
+      tooltip.style.left = (event.clientX + 15) + "px";
+      tooltip.style.top = (event.clientY - 10) + "px";
+    })
+    .on("mouseout", () => {
+      tooltip.style.display = "none";
+      d3.selectAll(".node-circle").transition().duration(300).style("opacity", 1);
+      d3.selectAll(".link").transition().duration(300).style("stroke-opacity", null);
+      if (!showLabels) d3.selectAll(".node-label:not(.always-visible)").classed("visible", false);
+    });
+    
+    simulation.on("tick", () => {
+      link
+        .attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+        .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+      node.attr("transform", d => `translate(${d.x},${d.y})`);
+    });
+    
+    function dragstarted(event) {
+      if (!event.active) simulation.alphaTarget(0.3).restart();
+      event.subject.fx = event.subject.x; event.subject.fy = event.subject.y;
+    }
+    function dragged(event) {
+      event.subject.fx = event.x; event.subject.fy = event.y;
+    }
+    function dragended(event) {
+      if (!event.active) simulation.alphaTarget(0);
+      event.subject.fx = null; event.subject.fy = null;
+    }
+    
+    // Initial zoom
+    setTimeout(() => resetZoom(), 500);
+  });
+</script>
+</body>
+</html>
