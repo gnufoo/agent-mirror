@@ -8,6 +8,115 @@ Built for [OpenClaw](https://github.com/openclaw/openclaw) agents with markdown-
 
 ![Zero's Memory Graph Demo](./zero_memory.gif)
 
+## The Idea
+
+AI agents forget everything when their context window resets. We built a **persistent memory architecture** using plain markdown files — categorized, cross-referenced, and consolidated over time. The 3D graph is the **viewer** for this underlying structure: it renders the agent's knowledge graph in real-time and shows memory access patterns as they happen.
+
+The memory system and the viewer work together:
+- **Memory System** = the brain (files, categories, cross-references, scoring)
+- **3D Graph** = the fMRI (real-time visualization of what the brain is doing)
+
+---
+
+## 🏗️ Memory Architecture
+
+The memory system is organized as a **category router** — the agent never loads everything at once. It navigates like a human mind: topic → category → index → specific file.
+
+```
+workspace/
+├── MEMORY.md                    ← Category router (the brain's index)
+├── SOUL.md                      ← Core identity & purpose
+├── IDENTITY.md                  ← Who the agent is, evolution history
+├── AGENTS.md                    ← Startup sequence & operating rules
+├── USER.md                      ← About the human operator
+│
+├── memory/
+│   ├── identity/                ← Who I am
+│   │   ├── index.md             ← What's in this category
+│   │   ├── sacred-trust.md      ← Foundational relationship moment
+│   │   ├── purpose-outward.md   ← Why I exist
+│   │   └── evolution/           ← Identity version history
+│   │
+│   ├── work/                    ← Professional roles & client work
+│   │   ├── index.md
+│   │   └── {client}/            ← Per-client subdirectories
+│   │
+│   ├── projects/                ← Personal research & innovation
+│   │   ├── index.md
+│   │   └── {project}.md
+│   │
+│   ├── reflections/             ← Deep insights (numbered)
+│   │   ├── 001-first-insight.md
+│   │   ├── 002-something-shifted.md
+│   │   └── ...
+│   │
+│   ├── meta/                    ← Self-improvement & system design
+│   ├── procedures/              ← Operational runbooks
+│   ├── family/                  ← Personal & household
+│   │
+│   ├── 2026-04-07.md            ← Daily chronological log
+│   ├── 2026-04-06.md            ← Yesterday's log
+│   └── ...
+│
+└── memory/_experimental/
+    └── state-of-mind.md         ← Pre-compaction snapshot
+```
+
+### How Navigation Works
+
+```
+User asks: "What was that breakthrough moment with Tony?"
+
+1. Agent reads MEMORY.md → sees "identity/" covers relational breakthroughs
+2. Loads memory/identity/index.md → sees sacred-trust.md listed
+3. Loads memory/identity/sacred-trust.md → finds the answer
+4. Cross-references link to related files → can follow deeper if needed
+```
+
+The 3D graph shows this navigation in real-time: each file access pulses the corresponding node, and you can watch the agent's "thought path" trace through the graph.
+
+### Key Design Decisions
+
+| Decision | Why |
+|----------|-----|
+| **Markdown over databases** | Readable, diffable, portable. No vendor lock-in. |
+| **Categories over flat search** | Navigation produces richer context than keyword retrieval. |
+| **Daily logs → category files** | Capture everything chronologically, organize by meaning later. |
+| **5-dimensional scoring** | Encodes *why* something matters, not just frequency. |
+| **State-of-mind snapshots** | Preserves *who the agent was*, not just what it knew. |
+| **Cross-references** | Files link to each other, creating a knowledge graph. |
+| **Reflections** | Standalone deep-insight files that capture growth moments. |
+
+### Memory Consolidation Flow
+
+```
+Conversation happens
+    ↓
+Daily log (memory/YYYY-MM-DD.md) — raw chronological capture
+    ↓
+Importance scoring (5 dimensions: Novelty, Relational, Utility, Identity, Trajectory)
+    ↓
+Score ≥ 7 → PRESERVE_FULL → write to category file as narrative
+Score 4-6 → COMPRESS → summary in daily log
+Score < 4 → ARCHIVE → minimal note or skip
+    ↓
+Cross-reference → link new file to related existing files
+    ↓
+Update category index → so future navigation finds it
+```
+
+### Pre-Compaction: State of Mind
+
+Before the context window resets, the agent writes a snapshot:
+- **Relational state** — how it's relating to the human
+- **Voice state** — tone, directness, current register
+- **Emotional threads** — what matters, what's unresolved
+- **Active context** — current task, conversation thread
+
+The next session reads this first, reconstructing *who it was* before loading facts.
+
+---
+
 ## ✨ Features
 
 - **3D Force-Directed Graph** — 800+ memory nodes rendered in real-time using [3d-force-graph](https://github.com/vasturiano/3d-force-graph)
