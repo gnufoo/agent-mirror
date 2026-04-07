@@ -6,7 +6,7 @@ Built for [OpenClaw](https://github.com/openclaw/openclaw) agents with markdown-
 
 ![3D Memory Graph](https://img.shields.io/badge/Three.js-3D_Force_Graph-blue) ![WebSocket](https://img.shields.io/badge/WebSocket-Live_Events-green) ![OpenClaw](https://img.shields.io/badge/OpenClaw-Compatible-orange)
 
-![Zero's Memory Graph Demo](./demo.gif)
+![Zero's Memory Graph Demo](./zero_memory.gif)
 
 ## ✨ Features
 
