@@ -6,9 +6,7 @@ Built for [OpenClaw](https://github.com/openclaw/openclaw) agents with markdown-
 
 ![3D Memory Graph](https://img.shields.io/badge/Three.js-3D_Force_Graph-blue) ![WebSocket](https://img.shields.io/badge/WebSocket-Live_Events-green) ![OpenClaw](https://img.shields.io/badge/OpenClaw-Compatible-orange)
 
-https://github.com/user-attachments/assets/demo.mp4
-
-https://github.com/gnufoo/agent-mirror/raw/master/demo.mp4
+<video src="https://github.com/gnufoo/agent-mirror/raw/master/demo.mp4" autoplay loop muted playsinline width="100%"></video>
 
 ## ✨ Features
 
