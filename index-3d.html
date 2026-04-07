@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Zero's Memory Graph — 3D</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="//cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 <script src="//unpkg.com/3d-force-graph@1.73.4/dist/3d-force-graph.min.js"></script>
 <style>
@@ -100,7 +101,7 @@ body{background:#0a0a0f;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFo
   <button id="labelBtn" onclick="toggleLabels()">Toggle Labels</button>
   <button id="refBtn" onclick="toggleRefs()">Show Cross-Refs</button>
   <button id="debugBtn" onclick="toggleDebug()" style="background:#a855f720;border-color:#a855f740;color:#a855f7;">✨ Debug Pulse</button>
-  <button id="histBtn" onclick="toggleHistory()">📜 History</button>
+  <button id="histBtn" onclick="requestHistory()">📜 History</button>
   <a href="/legacy" style="background:#16161e;border:1px solid #2a2a35;color:#666;border-radius:6px;padding:6px 12px;font-size:11px;font-family:'JetBrains Mono';text-decoration:none;">2D View</a>
 </div>
 
@@ -516,23 +517,91 @@ function addFeedItem(ev){
 
 connectWS();
 
-// === HISTORY PANEL ===
+// === AUTH + HISTORY PANEL ===
+const GOOGLE_CLIENT_ID = '594688168327-dt0r5uuce8igcvtgshper9ggruqr8et5.apps.googleusercontent.com';
+const ALLOWED_EMAIL = 'xia.tony@gmail.com';
 let historyVisible = false;
+let authedUser = null;
 
-function toggleHistory() {
-  historyVisible = !historyVisible;
-  const panel = document.getElementById('historyPanel');
-  const btn = document.getElementById('histBtn');
+function requestHistory() {
   if (historyVisible) {
-    panel.classList.add('show');
-    btn.style.background = '#4488ff30';
-    btn.style.color = '#4488ff';
-    loadHistory();
-  } else {
-    panel.classList.remove('show');
-    btn.style.background = '#16161e';
-    btn.style.color = '#aaa';
+    // Toggle off
+    historyVisible = false;
+    document.getElementById('historyPanel').classList.remove('show');
+    document.getElementById('histBtn').style.background = '#16161e';
+    document.getElementById('histBtn').style.color = '#aaa';
+    return;
   }
+
+  if (authedUser === ALLOWED_EMAIL) {
+    // Already authed
+    showHistory();
+    return;
+  }
+
+  // Trigger Google Sign-In
+  google.accounts.id.initialize({
+    client_id: GOOGLE_CLIENT_ID,
+    callback: handleGoogleAuth,
+    auto_select: false,
+  });
+  google.accounts.id.prompt((notification) => {
+    if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+      // Fallback: render button in a temporary overlay
+      showGoogleSignInOverlay();
+    }
+  });
+}
+
+function showGoogleSignInOverlay() {
+  let overlay = document.getElementById('authOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'authOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
+    overlay.innerHTML = `
+      <div style="background:#111118;border:1px solid #2a2a35;border-radius:12px;padding:32px;text-align:center;max-width:360px;">
+        <div style="font-size:24px;margin-bottom:12px;">🔒</div>
+        <div style="font-size:14px;font-weight:600;margin-bottom:4px;">Memory Access History</div>
+        <div style="font-size:12px;color:#888;margin-bottom:20px;">This is Zero's private thought record.<br>Sign in to verify your identity.</div>
+        <div id="googleBtnContainer"></div>
+        <button onclick="document.getElementById('authOverlay').remove()" style="margin-top:16px;background:none;border:1px solid #333;color:#888;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:11px;">Cancel</button>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+  }
+  google.accounts.id.renderButton(
+    document.getElementById('googleBtnContainer'),
+    { theme: 'filled_black', size: 'large', width: 280, text: 'signin_with' }
+  );
+}
+
+function handleGoogleAuth(response) {
+  // Decode JWT to get email
+  const payload = JSON.parse(atob(response.credential.split('.')[1]));
+  const email = payload.email;
+
+  // Remove overlay if present
+  const overlay = document.getElementById('authOverlay');
+  if (overlay) overlay.remove();
+
+  if (email !== ALLOWED_EMAIL) {
+    alert('Access denied. This history is private to Zero\'s operator.');
+    authedUser = null;
+    return;
+  }
+
+  authedUser = email;
+  console.log('Authenticated:', email);
+  showHistory();
+}
+
+function showHistory() {
+  historyVisible = true;
+  document.getElementById('historyPanel').classList.add('show');
+  document.getElementById('histBtn').style.background = '#4488ff30';
+  document.getElementById('histBtn').style.color = '#4488ff';
+  loadHistory();
 }
 
 function loadHistory() {
