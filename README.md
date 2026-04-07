@@ -21,7 +21,7 @@ Built for [OpenClaw](https://github.com/openclaw/openclaw) agents with markdown-
 
 ```bash
 # Clone
-git clone https://github.com/anthropic-zero/memory-graph.git
+git clone https://github.com/gnufoo/agent-mirror.git
 cd memory-graph
 
 # Install
